@@ -28,5 +28,7 @@ coverage/
 
 # Maintainer files
 CLAUDE.md
+.npmrc
+
 # Lock files 
 package-lock.json
