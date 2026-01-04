@@ -5,9 +5,9 @@ Fastify plugin for the [Satim (SATIM-IPAY)](https://github.com/bakissation/satim
 ## Requirements
 
 - **Node.js >= 18**
-- **Fastify v4** (v4.0.0 or higher)
+- **Fastify v4 or v5** (v4.0.0 or higher, v5.0.0 or higher)
 
-> **Note:** Fastify v5 requires Node.js 20+. This plugin targets Fastify v4 to maintain Node.js 18 compatibility. Fastify v5 support will be added in a future release.
+> **Note:** This plugin supports both Fastify v4 and v5. Fastify v5 requires Node.js 20+.
 
 ## Installation
 
@@ -63,9 +63,42 @@ await fastify.listen({ port: 3000 });
 
 ## Configuration
 
-The plugin accepts three ways to configure the Satim client:
+The plugin accepts four ways to configure the Satim client:
 
-### Option 1: Environment Variables (Recommended)
+### Option 1: Multi-Tenant with getClient (Recommended for Multi-Tenant)
+
+For applications serving multiple tenants with different Satim credentials:
+
+```typescript
+import { createSatimClient } from '@bakissation/satim';
+
+// Store clients per tenant (example using a Map)
+const tenantClients = new Map();
+
+await fastify.register(fastifySatim, {
+  getClient: (request) => {
+    const tenantId = request.headers['x-tenant-id'];
+
+    // Return cached client or create new one
+    if (!tenantClients.has(tenantId)) {
+      const client = createSatimClient({
+        userName: getTenantConfig(tenantId).userName,
+        password: getTenantConfig(tenantId).password,
+        terminalId: getTenantConfig(tenantId).terminalId,
+        apiBaseUrl: 'https://test2.satim.dz/payment/rest',
+      });
+      tenantClients.set(tenantId, client);
+    }
+
+    return tenantClients.get(tenantId);
+  },
+  routes: true,
+});
+```
+
+When `getClient` is provided, it takes precedence over all other configuration methods.
+
+### Option 2: Environment Variables (Recommended for Single-Tenant)
 
 Set up your environment variables and use `fromEnv: true`:
 
@@ -81,7 +114,7 @@ SATIM_API_URL=https://test2.satim.dz/payment/rest
 await fastify.register(fastifySatim, { fromEnv: true });
 ```
 
-### Option 2: Configuration Object
+### Option 3: Configuration Object
 
 Pass the configuration directly:
 
@@ -98,7 +131,7 @@ await fastify.register(fastifySatim, {
 });
 ```
 
-### Option 3: Pre-created Client
+### Option 4: Pre-created Client
 
 For advanced use cases, create the client yourself:
 
@@ -168,31 +201,81 @@ if (response.isSuccessful()) {
 
 ## Optional Routes
 
-For quick prototyping or simple integrations, you can enable built-in routes:
+For quick prototyping or simple integrations, you can enable built-in routes with flexible configuration:
+
+### Basic Route Configuration
 
 ```typescript
-// Enable with default prefix '/satim'
+// Enable all routes with defaults (POST method, default paths)
 await fastify.register(fastifySatim, {
   fromEnv: true,
   routes: true,
 });
 
-// Or with custom prefix
+// Custom prefix for all routes
 await fastify.register(fastifySatim, {
   fromEnv: true,
-  routes: { prefix: '/payments' },
+  routes: { prefix: '/api/payments' },
 });
 ```
 
-This registers the following routes:
+### Advanced Route Configuration
 
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `{prefix}/register` | Create a new payment order |
-| POST | `{prefix}/confirm` | Confirm a payment |
-| POST | `{prefix}/refund` | Refund a transaction |
+Configure each route individually with custom paths, methods, and hooks:
+
+```typescript
+await fastify.register(fastifySatim, {
+  fromEnv: true,
+  routes: {
+    prefix: '/api/payments',
+
+    // Only enable specific routes
+    register: {
+      path: '/create-order', // Custom path
+      method: 'POST',        // HTTP method (default: POST)
+      preHandler: async (request, reply) => {
+        // Route-specific authentication
+        if (!request.headers.authorization) {
+          throw new Error('Unauthorized');
+        }
+      },
+    },
+
+    confirm: {
+      path: '/verify',
+      // Per-route hooks
+      onSend: async (request, reply, payload) => {
+        // Log successful confirmations
+        console.log('Payment confirmed:', payload);
+        return payload;
+      },
+    },
+
+    // Omit 'refund' to not register the refund route
+  },
+
+  // Global hooks applied to all registered routes (can be overridden per-route)
+  preHandler: async (request, reply) => {
+    // Global authentication logic
+  },
+});
+```
+
+### Available Routes
+
+When enabled, the following routes are registered:
+
+| Route Key | Default Path | Default Method | Description |
+|-----------|--------------|----------------|-------------|
+| `register` | `/register` | POST | Create a new payment order |
+| `confirm` | `/confirm` | POST | Confirm a payment |
+| `refund` | `/refund` | POST | Refund a transaction |
+
+**Note:** Only routes explicitly configured will be registered. If you provide a routes object with only `register`, only the register route will be available.
 
 ### Route Request Bodies
+
+All routes accept bigint amounts as numbers, strings, or integers for handling large values.
 
 **POST /register**
 ```json
@@ -203,6 +286,16 @@ This registers the following routes:
   "udf1": "REF001",
   "failUrl": "https://example.com/fail",
   "description": "Order description"
+}
+```
+
+**Large amount example (using string):**
+```json
+{
+  "orderNumber": "ORD002",
+  "amount": "999999999999999999",
+  "returnUrl": "https://example.com/success",
+  "udf1": "REF002"
 }
 ```
 
@@ -223,7 +316,16 @@ This registers the following routes:
 }
 ```
 
-> **Note:** These routes are convenience endpoints for simple use cases. For production applications, you'll likely want to implement your own routes with proper authentication, validation, and business logic.
+**Refund with large amount (using string):**
+```json
+{
+  "orderId": "order-id",
+  "amount": "999999999999999999",
+  "language": "fr"
+}
+```
+
+> **Note:** These routes are convenience endpoints for simple use cases. For production applications, you should implement your own routes with proper authentication, CSRF protection, validation, and business logic. See the Security section below.
 
 ## TypeScript
 
@@ -247,6 +349,7 @@ const client: SatimClient = fastify.satim;
 import type {
   FastifySatimOptions,
   FastifySatimRoutesOptions,
+  RouteConfig,
   SatimClient,
   SatimConfig,
   RegisterOrderParams,
@@ -254,6 +357,9 @@ import type {
   ConfirmOrderResponse,
   RefundOrderResponse,
 } from '@bakissation/fastify-satim';
+
+// Also export the error handler
+import { satimErrorHandler } from '@bakissation/fastify-satim';
 ```
 
 ## Encapsulation
@@ -292,9 +398,123 @@ For SDK-specific errors (validation, HTTP, API errors), see the [@bakissation/sa
 
 ## Security
 
-- **No secret logging:** The plugin itself does not log any information. Logging behavior is controlled by the core SDK's configuration.
-- **Credentials in environment variables:** Always use environment variables for sensitive data in production.
-- **Server-side confirmation:** Always call `confirm()` server-side, never trust client-side callbacks.
+### Authentication and CSRF Protection
+
+**IMPORTANT:** All payment routes should be protected by authentication and CSRF tokens. The plugin will log a warning if you configure any route to use GET method.
+
+#### Integrating CSRF Protection
+
+Use `@fastify/csrf-protection` to secure your payment routes:
+
+```bash
+npm install @fastify/csrf-protection
+```
+
+```typescript
+import csrf from '@fastify/csrf-protection';
+
+await fastify.register(csrf);
+
+await fastify.register(fastifySatim, {
+  fromEnv: true,
+  routes: {
+    register: {
+      preHandler: fastify.csrfProtection, // CSRF protection
+    },
+    confirm: {
+      preHandler: [
+        // Multiple hooks: authentication + CSRF
+        async (request, reply) => {
+          // Verify user authentication
+          if (!request.user) {
+            throw new Error('Unauthorized');
+          }
+        },
+        fastify.csrfProtection,
+      ],
+    },
+  },
+});
+```
+
+#### Authentication Example
+
+```typescript
+await fastify.register(fastifySatim, {
+  fromEnv: true,
+  // Global authentication for all payment routes
+  preHandler: async (request, reply) => {
+    const token = request.headers.authorization?.replace('Bearer ', '');
+
+    if (!token) {
+      reply.code(401).send({ error: 'Unauthorized' });
+      return;
+    }
+
+    try {
+      request.user = await verifyToken(token);
+    } catch (error) {
+      reply.code(401).send({ error: 'Invalid token' });
+      return;
+    }
+  },
+  routes: true,
+});
+```
+
+### Error Handling
+
+The plugin includes centralized error handling that:
+
+- Maps SDK errors to appropriate HTTP status codes
+- Prevents leaking sensitive data in error responses
+- Provides structured error responses
+
+**Error Response Format:**
+
+```typescript
+// ValidationError (400 Bad Request)
+{
+  "error": "Bad Request",
+  "message": "Invalid amount: must be at least 50 DZD",
+  "statusCode": 400
+}
+
+// SatimApiError (502 Bad Gateway)
+{
+  "error": "Bad Gateway",
+  "message": "Insufficient funds",
+  "satimErrorCode": "INSUFFICIENT_FUNDS",
+  "statusCode": 502
+}
+
+// TimeoutError (504 Gateway Timeout)
+{
+  "error": "Gateway Timeout",
+  "message": "Payment gateway request timed out",
+  "statusCode": 504
+}
+```
+
+You can also use the error handler directly:
+
+```typescript
+import { satimErrorHandler } from '@bakissation/fastify-satim';
+
+// Apply to specific routes
+fastify.setErrorHandler(satimErrorHandler);
+```
+
+### Best Practices
+
+- **No secret logging:** The plugin does not log credentials or sensitive data. Logging behavior is controlled by the core SDK's configuration.
+- **Environment variables:** Always use environment variables for credentials in production.
+- **Server-side confirmation:** Always call `confirm()` server-side after payment. Never trust client-side callbacks alone.
+- **HTTPS only:** Always use HTTPS in production to protect credentials and payment data in transit.
+- **Rate limiting:** Implement rate limiting on payment routes to prevent abuse.
+- **Validation:** Validate all order data before creating payments (amount limits, order uniqueness, etc.).
+- **Idempotency:** Use unique `orderNumber` values to prevent duplicate payments.
+- **Multi-tenant isolation:** When using `getClient`, ensure proper tenant isolation to prevent credential leakage between tenants.
 
 ## License
 
