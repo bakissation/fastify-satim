@@ -1,6 +1,6 @@
 {
   "name": "@bakissation/fastify-satim",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Fastify plugin for the Satim (SATIM-IPAY) payment gateway SDK",
   "author": "Abdelbaki Berkati (@bakissation)",
   "license": "MIT",
@@ -50,11 +50,12 @@
     "url": "https://github.com/bakissation/fastify-satim"
   },
   "dependencies": {
-    "@bakissation/satim": "^1.0.0",
-    "fastify-plugin": "^4.5.0"
+    "@bakissation/satim": "^1.1.0",
+    "@sinclair/typebox": "^0.34.46",
+    "fastify-plugin": "^5.1.0"
   },
   "peerDependencies": {
-    "fastify": "^4.0.0"
+    "fastify": "^4.0.0 || ^5.0.0"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
