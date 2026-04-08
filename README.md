@@ -516,9 +516,15 @@ fastify.setErrorHandler(satimErrorHandler);
 - **Idempotency:** Use unique `orderNumber` values to prevent duplicate payments.
 - **Multi-tenant isolation:** When using `getClient`, ensure proper tenant isolation to prevent credential leakage between tenants.
 
+## Author
+
+**Abdelbaki Berkati** — [berkati.xyz](https://berkati.xyz) · [@bakissation](https://github.com/bakissation)
+
+[Read the case study →](https://berkati.xyz/case-studies/fastify-satim-plugin/)
+
 ## License
 
-MIT - Abdelbaki Berkati
+MIT
 
 ## See Also
 
